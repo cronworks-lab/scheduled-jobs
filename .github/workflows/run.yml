@@ -1,0 +1,130 @@
+name: Scheduled run
+
+# Template for the PUBLIC runner repo (copy to .github/workflows/run.yml there; see SETUP.md
+# "Public runner"). Public repos get standard runners for free, but their logs are world-readable,
+# so this job only clones the private source, calls scripts/public_run.sh phase by phase and prints
+# one status line per phase. Full logs, history and the dashboard are committed back to the private
+# repo, never to this one, and no artifacts are uploaded.
+#
+# Secrets on this repo: PRIVATE_REPO (owner/name), PRIVATE_REPO_TOKEN (fine-grained PAT on the private
+# repo only: Contents read/write to clone and save history, Actions read/write to check the private
+# runner is idle and to start the article site build) and AUTOPILOT_ENV (the settings bundle written
+# by the private repo's "Sync secrets to public runner" workflow).
+
+on:
+  schedule:                  # cadence: change it here AND in SLOTS below (same file)
+    - cron: "23 2 * * *"
+    - cron: "47 6 * * *"
+    - cron: "30 9 * * *"
+    - cron: "41 13 * * *"
+    - cron: "11 17 * * *"
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Format
+        type: choice
+        options: [short, long]
+        default: short
+      style:
+        description: Style (Shorts only; feelgood = caption story with music, pets = cat and dog story)
+        type: choice
+        options: [standard, feelgood, pets]
+        default: standard
+      dry_run:
+        description: Render only, no upload (only the run log is saved, in the private repo)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read             # this repo is only read; all writes go to the private repo via the PAT
+  models: read               # free GitHub Models inference with the built-in token
+  actions: read              # the dashboard lists this workflow's recent runs
+
+concurrency:
+  group: scheduled-run
+  cancel-in-progress: false
+
+env:
+  AUTOPILOT_QUIET: "1"
+  AUTOPILOT_RUNS_WORKFLOW: run.yml
+  # cron | format | style | dashboard. A cron that is not listed makes a standard Short.
+  # dashboard=yes on one slot a day keeps the YouTube Data API quota for the six uploads.
+  SLOTS: |
+    23 2 * * *  | short | standard | no     # 07:53 IST, India morning
+    47 6 * * *  | short | standard | no     # 12:17 IST, India lunch
+    30 9 * * *  | long  | standard | no     # 15:00 IST, daily long video
+    41 13 * * * | short | standard | no     # 19:11 IST, India evening
+    11 17 * * * | short | standard | no     # 13:11 US Eastern, US lunch
+    17 0 * * *  | short | feelgood | yes    # 20:17 US Eastern, last run of the day
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest is migrating to 26
+    timeout-minutes: 90
+    steps:
+      - name: Fetch source
+        id: fetch
+        env:
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          if [ -z "$PRIVATE_REPO" ] || [ -z "$PRIVATE_REPO_TOKEN" ]; then
+            echo "fetch: runner secrets are not set (see SETUP.md in the private repo)"
+            exit 1
+          fi
+          # the helper reads the token from the env of whichever step runs git, so it never hits disk
+          git config --global credential.helper '!f() { test "$1" = get && echo username=x-access-token && echo "password=${PRIVATE_REPO_TOKEN}"; }; f'
+          git clone -q --depth 30 "https://github.com/${PRIVATE_REPO}.git" .
+          echo "fetch: ok"
+      - name: Wait for the other runner
+        env:
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: bash scripts/public_run.sh guard
+      - name: Pick slot
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_FORMAT: ${{ inputs.format }}
+          INPUT_STYLE: ${{ inputs.style }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: bash scripts/public_run.sh slot
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5, pinned
+        with: { python-version: "3.12", cache: pip }
+      - name: Install ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@37062fbf7149fc5578d6c57e08aed62458b375d6  # v3.1, pinned
+        with:
+          ffmpeg-version: release
+      - name: Install
+        run: bash scripts/public_run.sh install
+      - name: Checks
+        run: bash scripts/public_run.sh checks
+      - name: Load settings
+        id: settings
+        env:
+          AUTOPILOT_ENV: ${{ secrets.AUTOPILOT_ENV }}
+        run: bash scripts/public_run.sh settings
+      - name: Build and publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/public_run.sh video
+      - name: Refresh stats
+        if: ${{ always() && steps.settings.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/public_run.sh dashboard
+      - name: Save results
+        if: ${{ always() && steps.fetch.outcome == 'success' }}
+        env:
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash scripts/public_run.sh save
+      - name: Clean up
+        if: ${{ always() }}
+        run: |
+          rm -rf .secrets
+          git config --global --unset-all credential.helper || true
