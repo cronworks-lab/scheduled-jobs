@@ -19,6 +19,11 @@ on:
     - cron: "41 13 * * *"
     - cron: "11 17 * * *"
     - cron: "17 0 * * *"
+    - cron: "5 4 * * *"
+    - cron: "13 8 * * *"
+    - cron: "37 11 * * *"
+    - cron: "23 15 * * *"
+    - cron: "7 21 * * *"
   workflow_dispatch:
     inputs:
       format:
@@ -49,7 +54,8 @@ env:
   AUTOPILOT_QUIET: "1"
   AUTOPILOT_RUNS_WORKFLOW: run.yml
   # cron | format | style | dashboard. A cron that is not listed makes a standard Short.
-  # dashboard=yes on one slot a day keeps the YouTube Data API quota for the six uploads.
+  # dashboard=yes on one slot a day keeps the YouTube Data API quota for the uploads. Since the
+  # Dec 2025 and Jun 2026 quota changes an upload costs far less, so 11 a day fit the default quota.
   SLOTS: |
     23 2 * * *  | short | standard | no     # 07:53 IST, India morning
     47 6 * * *  | short | standard | no     # 12:17 IST, India lunch
@@ -57,6 +63,11 @@ env:
     41 13 * * * | short | standard | no     # 19:11 IST, India evening
     11 17 * * * | short | standard | no     # 13:11 US Eastern, US lunch
     17 0 * * *  | short | feelgood | yes    # 20:17 US Eastern, last run of the day
+    5 4 * * *   | short | standard | no     # 09:35 IST, India commute
+    13 8 * * *  | short | pets     | no     # 13:43 IST, India afternoon
+    37 11 * * * | short | standard | no     # 17:07 IST, India after work
+    23 15 * * * | short | standard | no     # 20:53 IST, India prime time
+    7 21 * * *  | short | feelgood | no     # 16:07 US Eastern, US afternoon
 
 jobs:
   run:
