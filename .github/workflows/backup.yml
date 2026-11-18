@@ -1,0 +1,57 @@
+name: Backup trigger
+
+# GitHub can drop or badly delay scheduled runs, especially right after a workflow is disabled and
+# enabled again. Every 30 minutes this checks run.yml: if nothing is running or queued and the last
+# successful run is older than the slot gap, it starts run.yml once. run.yml keeps its own
+# concurrency group, so this can never produce two uploads at the same time.
+
+on:
+  schedule:
+    - cron: "19,49 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write             # only to start run.yml
+  contents: read
+
+concurrency:
+  group: backup-trigger
+  cancel-in-progress: false
+
+env:
+  MAX_AGE_MIN: "150"         # longest normal gap between slots is about 3h, most are under 2h30
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Start run.yml if a slot was missed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          busy=0
+          for s in in_progress queued waiting pending requested; do
+            n=$(gh run list -w run.yml -s "$s" -L 5 --json databaseId --jq 'length')
+            busy=$((busy + n))
+          done
+          if [ "$busy" -gt 0 ]; then
+            echo "backup: run.yml already active ($busy), nothing to do"
+            exit 0
+          fi
+          last=$(gh run list -w run.yml -s success -L 1 --json updatedAt --jq '.[0].updatedAt // empty')
+          now=$(date -u +%s)
+          if [ -n "$last" ]; then
+            age=$(( (now - $(date -u -d "$last" +%s)) / 60 ))
+          else
+            age=999999
+          fi
+          echo "backup: last successful run ended $age min ago (limit $MAX_AGE_MIN)"
+          if [ "$age" -lt "$MAX_AGE_MIN" ]; then
+            echo "backup: recent enough, nothing to do"
+            exit 0
+          fi
+          gh workflow run run.yml --ref "${GITHUB_REF_NAME}"
+          echo "backup: started run.yml"
