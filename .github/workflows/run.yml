@@ -32,9 +32,9 @@ on:
         options: [short, long]
         default: short
       style:
-        description: Style (Shorts only; feelgood = caption story with music, pets = cat and dog story)
+        description: Style (Shorts only; feelgood = caption story with music, pets = cat and dog story, devotional = god story)
         type: choice
-        options: [standard, feelgood, pets]
+        options: [standard, feelgood, pets, devotional]
         default: standard
       dry_run:
         description: Render only, no upload (only the run log is saved, in the private repo)
@@ -57,7 +57,7 @@ env:
   # dashboard=yes on one slot a day keeps the YouTube Data API quota for the uploads. Since the
   # Dec 2025 and Jun 2026 quota changes an upload costs far less, so 11 a day fit the default quota.
   SLOTS: |
-    23 2 * * *  | short | standard | no     # 07:53 IST, India morning
+    23 2 * * *  | short | devotional | no   # 07:53 IST, India morning (god stories)
     47 6 * * *  | short | standard | no     # 12:17 IST, India lunch
     30 9 * * *  | long  | standard | no     # 15:00 IST, daily long video
     41 13 * * * | short | standard | no     # 19:11 IST, India evening
